@@ -43,6 +43,7 @@ enum UnitHook
     UNITHOOK_ON_UNIT_ENTER_COMBAT,
     UNITHOOK_ON_UNIT_DEATH,
     UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM,
+    UNITHOOK_ON_CALCULATE_UNIT_SPEED,  // ← ДОБАВЬ ЭТУ СТРОКУ
     UNITHOOK_END
 };
 
@@ -108,6 +109,8 @@ public:
     virtual void OnUnitEnterCombat(Unit* /*unit*/, Unit* /*victim*/) { }
     virtual void OnUnitDeath(Unit* /*unit*/, Unit* /*killer*/) { }
     virtual void OnUnitSetShapeshiftForm(Unit* /*unit*/, uint8 /*form*/) { }
+    // В UnitScript.h, внутри class UnitScript
+    virtual void OnCalculateUnitSpeed(Unit* unit, UnitMoveType mtype, float& speed) { }
 };
 
 #endif

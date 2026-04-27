@@ -219,7 +219,7 @@ bool ItemCanGoIntoBag(ItemTemplate const* proto, ItemTemplate const* pBagProto);
 class Item : public Object
 {
 public:
-    static Item* CreateItem(uint32 item, uint32 count, Player const* player = nullptr, bool clone = false, uint32 randomPropertyId = 0);
+    static Item* CreateItem(uint32 item, uint32 count, Player const* player = nullptr, bool clone = false, int32 randomPropertyId = 0, uint32 customIlvl = 0);
     Item* CloneItem(uint32 count, Player const* player = nullptr) const;
 
     Item();
@@ -290,6 +290,9 @@ public:
 
     uint32 GetSkill();
     uint32 GetSpell();
+
+    void SetCustomIlvl(uint32 ilvl) { _customIlvl = ilvl; }
+    uint32 GetCustomIlvl() const { return _customIlvl; }
 
     // RandomPropertyId (signed but stored as unsigned)
     [[nodiscard]] int32 GetItemRandomPropertyId() const { return GetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID); }
@@ -376,5 +379,6 @@ private:
     uint32 m_paidMoney;
     uint32 m_paidExtendedCost;
     AllowedLooterSet allowedGUIDs;
+    uint32 _customIlvl;
 };
 #endif

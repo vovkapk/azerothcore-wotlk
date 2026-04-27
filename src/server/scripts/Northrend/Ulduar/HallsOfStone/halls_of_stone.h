@@ -88,6 +88,7 @@ enum npcs
     ACTION_START_SJONNIR_FIGHT      = 5,
     ACTION_SJONNIR_DEAD             = 6,
     ACTION_SJONNIR_WIPE_START       = 7,
+    ACTION_SKIP_TRIBUNAL            = 8,
 };
 
 template <class AI, class T>

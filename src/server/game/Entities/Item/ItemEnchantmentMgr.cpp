@@ -122,64 +122,57 @@ uint32 GetItemEnchantMod(int32 entry)
     return 0;
 }
 
-uint32 GenerateEnchSuffixFactor(uint32 item_id)
+// ItemEnchantmentMgr.cpp
+uint32 GenerateEnchSuffixFactor(uint32 item_id, uint32 customIlvl /*= 0*/)
 {
     ItemTemplate const* itemProto = sObjectMgr->GetItemTemplate(item_id);
+    if (!itemProto) return 0;
 
-    if (!itemProto)
-        return 0;
-    if (!itemProto->RandomSuffix)
-        return 0;
+    // ЛОГИКА: Если пришел customIlvl (не 0), используем его. 
+    // Если пришел 0, используем стандарт из шаблона (как раньше).
+    uint32 effectiveIlvl = (customIlvl != 0) ? customIlvl : itemProto->ItemLevel;
 
-    RandomPropertiesPointsEntry const* randomProperty = sRandomPropertiesPointsStore.LookupEntry(itemProto->ItemLevel);
-    if (!randomProperty)
-        return 0;
+    RandomPropertiesPointsEntry const* randomProperty = sRandomPropertiesPointsStore.LookupEntry(effectiveIlvl);
+    if (!randomProperty) return 0;
 
     uint32 suffixFactor;
     switch (itemProto->InventoryType)
     {
-        // Items of that type don`t have points
-        case INVTYPE_NON_EQUIP:
-        case INVTYPE_BAG:
-        case INVTYPE_TABARD:
-        case INVTYPE_AMMO:
-        case INVTYPE_QUIVER:
-        case INVTYPE_RELIC:
-            return 0;
-        // Select point coefficient
-        case INVTYPE_HEAD:
-        case INVTYPE_BODY:
-        case INVTYPE_CHEST:
-        case INVTYPE_LEGS:
-        case INVTYPE_2HWEAPON:
-        case INVTYPE_ROBE:
-            suffixFactor = 0;
-            break;
-        case INVTYPE_SHOULDERS:
-        case INVTYPE_WAIST:
-        case INVTYPE_FEET:
-        case INVTYPE_HANDS:
-        case INVTYPE_TRINKET:
-            suffixFactor = 1;
-            break;
-        case INVTYPE_NECK:
-        case INVTYPE_WRISTS:
-        case INVTYPE_FINGER:
-        case INVTYPE_SHIELD:
-        case INVTYPE_CLOAK:
-        case INVTYPE_HOLDABLE:
-            suffixFactor = 2;
-            break;
-        case INVTYPE_WEAPON:
-        case INVTYPE_WEAPONMAINHAND:
-        case INVTYPE_WEAPONOFFHAND:
-            suffixFactor = 3;
-            break;
-        case INVTYPE_RANGED:
-        case INVTYPE_THROWN:
-        case INVTYPE_RANGEDRIGHT:
-            suffixFactor = 4;
-            break;
+        // Items of that type don`t have points// Предметы, не имеющие характеристик или не являющиеся экипировкой
+    case INVTYPE_NON_EQUIP: // Разное (используемые предметы и т.д.)
+    case INVTYPE_BAG:       // Сумки
+    case INVTYPE_AMMO:      // Боеприпасы
+    case INVTYPE_QUIVER:    // Колчаны
+        return 0; // Коэффициент 0: статы не генерируются
+
+    // Select point coefficient - крупные предметы с максимальным бюджетом статов
+    case INVTYPE_HEAD:      // Голова
+    case INVTYPE_SHOULDERS: // Плечи
+    case INVTYPE_CHEST:     // Грудь
+    case INVTYPE_ROBE:      // Роба
+    case INVTYPE_WRISTS:    // Запястья
+    case INVTYPE_HANDS:     // Кисти (перчатки)
+    case INVTYPE_WAIST:     // Пояс
+    case INVTYPE_LEGS:      // Ноги
+    case INVTYPE_FEET:      // Ступни
+    case INVTYPE_2HWEAPON:  // Двуручное оружие
+    case INVTYPE_BODY:      // Рубашки
+    case INVTYPE_TABARD:    // Накидки
+    case INVTYPE_TRINKET:   // Аксессуары
+    case INVTYPE_RELIC:     // Реликвии (идолы, либры и т.д.)
+    case INVTYPE_NECK:      // Шея (амулеты)
+    case INVTYPE_FINGER:    // Палец (кольца)
+    case INVTYPE_SHIELD:    // Щиты
+    case INVTYPE_CLOAK:     // Спина (плащи)
+    case INVTYPE_HOLDABLE:  // Предметы в левой руке
+    case INVTYPE_WEAPON:        // Одноручное оружие (любое)
+    case INVTYPE_WEAPONMAINHAND: // Основная рука
+    case INVTYPE_WEAPONOFFHAND:  // Вторая рука
+    case INVTYPE_RANGED:      // Луки, арбалеты
+    case INVTYPE_THROWN:      // Метательное
+    case INVTYPE_RANGEDRIGHT: // Огнестрельное / Жезлы
+        suffixFactor = 0; // Самый низкий множитель для больших слотов (базовый бюджет)
+        break;
         default:
             return 0;
     }
@@ -187,14 +180,21 @@ uint32 GenerateEnchSuffixFactor(uint32 item_id)
     switch (itemProto->Quality)
     {
         case ITEM_QUALITY_UNCOMMON:
-            return randomProperty->UncommonPropertiesPoints[suffixFactor];
         case ITEM_QUALITY_RARE:
-            return randomProperty->RarePropertiesPoints[suffixFactor];
         case ITEM_QUALITY_EPIC:
-            return randomProperty->EpicPropertiesPoints[suffixFactor];
         case ITEM_QUALITY_LEGENDARY:
         case ITEM_QUALITY_ARTIFACT:
-            return 0;                                       // not have random properties
+            return randomProperty->EpicPropertiesPoints[suffixFactor];
+        case ITEM_QUALITY_NORMAL: // БЕЛОЕ качество
+            // Проверяем: если это рубашка или накидка, даем им статы
+            if (itemProto->InventoryType == INVTYPE_BODY || itemProto->InventoryType == INVTYPE_TABARD)
+            {
+                // Можно использовать EpicPropertiesPoints для крутых статов 
+                // или RarePropertiesPoints, если хочешь, чтобы на рубашках статов было чуть меньше
+                return randomProperty->EpicPropertiesPoints[suffixFactor];
+            }
+            break;
+
         default:
             break;
     }

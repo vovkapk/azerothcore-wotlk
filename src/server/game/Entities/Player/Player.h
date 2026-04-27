@@ -1321,8 +1321,12 @@ public:
     InventoryResult CanUseItem(ItemTemplate const* pItem) const;
     [[nodiscard]] InventoryResult CanUseAmmo(uint32 item) const;
     InventoryResult CanRollForItemInLFG(ItemTemplate const* item, WorldObject const* lootedObject) const;
-    Item* StoreNewItem(ItemPosCountVec const& pos, uint32 item, bool update, int32 randomPropertyId = 0, bool refund = false);
-    Item* StoreNewItem(ItemPosCountVec const& pos, uint32 item, bool update, int32 randomPropertyId, AllowedLooterSet& allowedLooters, bool refund = false);
+    // 1. Обычное создание (без лотеров)
+    Item* StoreNewItem(ItemPosCountVec const& pos, uint32 item, bool update, int32 randomPropertyId = 0, uint32 customIlvl = 0, bool refund = false);
+
+    // 2. Создание с лотерами (специальное)
+    Item* StoreNewItem(ItemPosCountVec const& pos, uint32 item, bool update, int32 randomPropertyId, AllowedLooterSet& allowedLooters, uint32 customIlvl = 0, bool refund = false);
+
     Item* StoreItem(ItemPosCountVec const& pos, Item* pItem, bool update);
     Item* EquipNewItem(uint16 pos, uint32 item, bool update);
     Item* EquipItem(uint16 pos, Item* pItem, bool update);
@@ -2391,6 +2395,12 @@ public:
 
     [[nodiscard]] uint32 GetSaveTimer() const { return m_nextSave; }
     void SetSaveTimer(uint32 timer) { m_nextSave = timer; }
+
+    uint32 GetRecallMapId() const { return m_recallMap; }
+    float GetRecallX() const { return m_recallX; }
+    float GetRecallY() const { return m_recallY; }
+    float GetRecallZ() const { return m_recallZ; }
+    float GetRecallO() const { return m_recallO; }
 
     // Recall position
     uint32 m_recallMap;

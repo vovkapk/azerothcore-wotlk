@@ -134,6 +134,11 @@ void ScriptMgr::OnUnitSetShapeshiftForm(Unit* unit, uint8 form)
     CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM, script->OnUnitSetShapeshiftForm(unit, form));
 }
 
+void ScriptMgr::OnCalculateUnitSpeed(Unit* unit, UnitMoveType mtype, float& speed)
+{
+    CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_CALCULATE_UNIT_SPEED, script->OnCalculateUnitSpeed(unit, mtype, speed));
+}
+
 UnitScript::UnitScript(const char* name, bool addToScripts, std::vector<uint16> enabledHooks)
     : ScriptObject(name, UNITHOOK_END)
 {

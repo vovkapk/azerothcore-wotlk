@@ -154,6 +154,7 @@ struct LootItem
 {
     uint32  itemid;
     uint32  itemIndex;
+    uint32  customIlvl{ 0 }; // Инициализация нулем прямо здесь!
     uint32  randomSuffix;
     int32   randomPropertyId;
     ConditionList conditions;                               // additional loot condition

@@ -518,6 +518,10 @@ public:
 
             me->RemoveNpcFlag(UNIT_NPC_FLAG_GOSSIP);
 
+            // Вместо иммунитета – даём Артасу огромный запас здоровья и регенерацию
+            me->SetMaxHealth(1'000'000);
+            me->SetHealth(1'000'000);
+
             if (pInstance)
             {
                 pInstance->SetData(DATA_ARTHAS_REPOSITION, 1);
@@ -1195,7 +1199,14 @@ public:
                 case EVENT_COMBAT_HEALTH_CHECK:
                     if (HealthBelowPct(40))
                         me->CastSpell(me, SPELL_ARTHAS_HOLY_LIGHT, false);
-
+                    // Регенерация 1% от максимального здоровья в секунду
+                    if (me->GetHealth() < me->GetMaxHealth())
+                    {
+                        uint32 newHealth = me->GetHealth() + me->GetMaxHealth() / 10;
+                        if (newHealth > me->GetMaxHealth())
+                            newHealth = me->GetMaxHealth();
+                        me->SetHealth(newHealth);
+                    }
                     combatEvents.Repeat(1s);
                     break;
             }
@@ -1245,6 +1256,7 @@ void npc_arthas::npc_arthasAI::SummonNextWave()
 void npc_arthas::npc_arthasAI::JustEngagedWith(Unit* /*who*/)
 {
     DoCast(me, SPELL_ARTHAS_AURA);
+
 
     // Fight
     combatEvents.ScheduleEvent(EVENT_COMBAT_EXORCISM, 2s);

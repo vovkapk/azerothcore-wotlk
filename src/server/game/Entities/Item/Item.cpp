@@ -277,6 +277,8 @@ Item::Item()
     m_refundRecipient = 0;
     m_paidMoney = 0;
     m_paidExtendedCost = 0;
+    // Инициализируем твою переменную, чтобы не было мусора
+    _customIlvl = 0;
 }
 
 bool Item::Create(ObjectGuid::LowType guidlow, uint32 itemid, Player const* owner)
@@ -354,10 +356,12 @@ void Item::SaveToDB(CharacterDatabaseTransaction trans)
                 stmt->SetData(++index, GetCount());
                 stmt->SetData(++index, GetUInt32Value(ITEM_FIELD_DURATION));
 
+
                 std::ostringstream ssSpells;
                 for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
                     ssSpells << GetSpellCharges(i) << ' ';
                 stmt->SetData(++index, ssSpells.str());
+
 
                 stmt->SetData(++index, GetUInt32Value(ITEM_FIELD_FLAGS));
 
@@ -385,6 +389,25 @@ void Item::SaveToDB(CharacterDatabaseTransaction trans)
                     stmt->SetData(1, guid);
                     trans->Append(stmt);
                 }
+
+                // 1. Сначала ВСЕГДА удаляем старые кастомные данные для этого GUID.
+                // Это гарантирует, что у нас не будет дубликатов и мусора.
+                CharacterDatabasePreparedStatement* stmtDel = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ITEM_CUSTOM_DATA);
+                stmtDel->SetData(0, guid);
+                trans->Append(stmtDel);
+
+                // 2. Теперь, если новый iLvl задан, записываем его.
+                if (_customIlvl > 0)
+                {
+                    // Проверка на класс предмета (броня/оружие)
+                    if (GetTemplate() && (GetTemplate()->Class == ITEM_CLASS_ARMOR || GetTemplate()->Class == ITEM_CLASS_WEAPON))
+                    {
+                        CharacterDatabasePreparedStatement* stmtCustom = CharacterDatabase.GetPreparedStatement(CHAR_INS_ITEM_CUSTOM_DATA);
+                        stmtCustom->SetData(0, guid);
+                        stmtCustom->SetData(1, _customIlvl);
+                        trans->Append(stmtCustom);
+                    }
+                }
                 break;
             }
         case ITEM_REMOVED:
@@ -392,6 +415,13 @@ void Item::SaveToDB(CharacterDatabaseTransaction trans)
                 CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ITEM_INSTANCE);
                 stmt->SetData(0, guid);
                 trans->Append(stmt);
+
+                // --- ВОТ СЮДА ВСТАВЛЯЕМ НАШ ЗАПРОС ---
+                // Удаляем кастомный iLvl, чтобы не оставлять мусор в БД
+                CharacterDatabasePreparedStatement* stmtCustom = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ITEM_CUSTOM_DATA);
+                stmtCustom->SetData(0, guid);
+                trans->Append(stmtCustom);
+                // -------------------------------------
 
                 if (IsWrapped())
                 {
@@ -418,90 +448,107 @@ void Item::SaveToDB(CharacterDatabaseTransaction trans)
 
 bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fields, uint32 entry)
 {
-    //                                                    0                1      2         3        4      5             6                 7           8           9    10
-    //result = CharacterDatabase.Query("SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, playedTime, text FROM item_instance WHERE guid = '{}'", guid);
+    // Маячок: начало загрузки конкретного GUID
+    //LOG_ERROR("entities.item", ">>> LoadFromDB START: Entry {}, GUID {}", entry, guid);
 
-    // create item before any checks for store correct guid
-    // and allow use "FSetState(ITEM_REMOVED); SaveToDB();" for deleting item from DB
     Object::_Create(guid, 0, HighGuid::Item);
-
-    // Set entry, MUST be before proto check
     SetEntry(entry);
     SetObjectScale(1.0f);
 
     ItemTemplate const* proto = GetTemplate();
     if (!proto)
     {
-        LOG_ERROR("entities.item", "Invalid entry {} for item {}. Refusing to load.", GetEntry(), GetGUID().ToString());
+        LOG_ERROR("entities.item", "!!! LOAD_ERROR: Item {} (GUID {}) has NO TEMPLATE. Database corruption!", entry, guid);
         return false;
     }
 
-    // set owner (not if item is only loaded for gbank/auction/mail
     if (owner_guid)
         SetOwnerGUID(owner_guid);
 
-    bool need_save = false;                                 // need explicit save data at load fixes
-    SetGuidValue(ITEM_FIELD_CREATOR, ObjectGuid::Create<HighGuid::Player>(fields[0].Get<uint32>()));
-    SetGuidValue(ITEM_FIELD_GIFTCREATOR, ObjectGuid::Create<HighGuid::Player>(fields[1].Get<uint32>()));
-    SetCount(fields[2].Get<uint32>());
+    bool need_save = false;
 
-    uint32 duration = fields[3].Get<uint32>();
-    SetUInt32Value(ITEM_FIELD_DURATION, duration);
-    // update duration if need, and remove if not need
-    if ((proto->Duration == 0) != (duration == 0))
-    {
-        SetUInt32Value(ITEM_FIELD_DURATION, proto->Duration);
-        need_save = true;
+    // ВАЖНО: Если fields переданы некорректно, этот код вызовет краш.
+    // Убедись, что запрос в месте вызова LoadFromDB имеет достаточно колонок!
+    try {
+        SetGuidValue(ITEM_FIELD_CREATOR, ObjectGuid::Create<HighGuid::Player>(fields[0].Get<uint32>()));
+        SetGuidValue(ITEM_FIELD_GIFTCREATOR, ObjectGuid::Create<HighGuid::Player>(fields[1].Get<uint32>()));
+        SetCount(fields[2].Get<uint32>());
+
+        uint32 duration = fields[3].Get<uint32>();
+        SetUInt32Value(ITEM_FIELD_DURATION, duration);
+
+        if ((proto->Duration == 0) != (duration == 0))
+        {
+            SetUInt32Value(ITEM_FIELD_DURATION, proto->Duration);
+            need_save = true;
+        }
+
+        std::vector<std::string_view> tokens = Acore::Tokenize(fields[4].Get<std::string_view>(), ' ', false);
+        if (tokens.size() == MAX_ITEM_PROTO_SPELLS)
+        {
+            for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
+            {
+                if (Optional<int32> charges = Acore::StringTo<int32>(tokens[i]))
+                    SetSpellCharges(i, *charges);
+                else
+                    LOG_ERROR("entities.item", "!!! LOAD_ERROR: Invalid charge data '{}' for item {} (GUID {}).", tokens.at(i), entry, guid);
+            }
+        }
+
+        SetUInt32Value(ITEM_FIELD_FLAGS, fields[5].Get<uint32>());
+        if (IsSoulBound() && proto->Bonding == NO_BIND && sScriptMgr->CanApplySoulboundFlag(this, proto))
+        {
+            ApplyModFlag(ITEM_FIELD_FLAGS, ITEM_FIELD_FLAG_SOULBOUND, false);
+            need_save = true;
+        }
+
+        if (!_LoadIntoDataField(fields[6].Get<std::string>(), ITEM_FIELD_ENCHANTMENT_1_1, MAX_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET))
+        {
+            LOG_ERROR("entities.item", "!!! LOAD_ERROR: Invalid enchant data for item {} (GUID {}).", entry, guid);
+        }
+
+        SetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID, fields[7].Get<int16>());
+
+        uint32 durability = fields[8].Get<uint16>();
+        SetUInt32Value(ITEM_FIELD_DURABILITY, durability);
+
+        SetUInt32Value(ITEM_FIELD_MAXDURABILITY, proto->MaxDurability);
+        if (durability > proto->MaxDurability && !IsWrapped())
+        {
+            SetUInt32Value(ITEM_FIELD_DURABILITY, proto->MaxDurability);
+            need_save = true;
+        }
+
+        SetUInt32Value(ITEM_FIELD_CREATE_PLAYED_TIME, fields[9].Get<uint32>());
+        SetText(fields[10].Get<std::string>());
+    }
+    catch (std::exception& e) {
+        LOG_ERROR("entities.item", "!!! CRITICAL: Exception during field reading for item {} (GUID {}): {}", entry, guid, e.what());
+        return false;
     }
 
-    std::vector<std::string_view> tokens = Acore::Tokenize(fields[4].Get<std::string_view>(), ' ', false);
-    if (tokens.size() == MAX_ITEM_PROTO_SPELLS)
+    // --- Кастомные данные ---
+    _customIlvl = 0;
+    CharacterDatabasePreparedStatement* stmtCustom = CharacterDatabase.GetPreparedStatement(CHAR_SEL_ITEM_CUSTOM_DATA);
+    stmtCustom->SetData(0, guid);
+    PreparedQueryResult resultCustom = CharacterDatabase.Query(stmtCustom);
+
+    if (resultCustom)
     {
-        for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
+        Field* customFields = resultCustom->Fetch();
+        _customIlvl = customFields[0].Get<uint32>();
+
+        if (_customIlvl > 0 && (proto->Class != ITEM_CLASS_ARMOR && proto->Class != ITEM_CLASS_WEAPON))
         {
-            if (Optional<int32> charges = Acore::StringTo<int32>(tokens[i]))
-                SetSpellCharges(i, *charges);
-            else
-                LOG_ERROR("entities.item", "Invalid charge info '{}' for item {}, charge data not loaded.", tokens.at(i), GetGUID().ToString());
+            LOG_ERROR("entities.item", "!!! DATA_ERROR: Item {} (GUID {}) has illegal customIlvl. Resetting.", entry, guid);
+            _customIlvl = 0;
         }
     }
 
-    SetUInt32Value(ITEM_FIELD_FLAGS, fields[5].Get<uint32>());
-    // Remove bind flag for items vs NO_BIND set
-    if (IsSoulBound() && proto->Bonding == NO_BIND && sScriptMgr->CanApplySoulboundFlag(this, proto))
-    {
-        ApplyModFlag(ITEM_FIELD_FLAGS, ITEM_FIELD_FLAG_SOULBOUND, false);
-        need_save = true;
-    }
-
-    std::string enchants = fields[6].Get<std::string>();
-
-    if (!_LoadIntoDataField(fields[6].Get<std::string>(), ITEM_FIELD_ENCHANTMENT_1_1, MAX_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET))
-    {
-        LOG_WARN("entities.item", "Invalid enchantment data '{}' for item {}. Forcing partial load.", fields[6].Get<std::string>(), GetGUID().ToString());
-    }
-
-    SetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID, fields[7].Get<int16>());
-    // recalculate suffix factor
     if (GetItemRandomPropertyId() < 0)
         UpdateItemSuffixFactor();
 
-    uint32 durability = fields[8].Get<uint16>();
-    SetUInt32Value(ITEM_FIELD_DURABILITY, durability);
-
-    // update max durability (and durability) if need
-    // xinef: do not overwrite durability for wrapped items!!
-    SetUInt32Value(ITEM_FIELD_MAXDURABILITY, proto->MaxDurability);
-    if (durability > proto->MaxDurability && !IsWrapped())
-    {
-        SetUInt32Value(ITEM_FIELD_DURABILITY, proto->MaxDurability);
-        need_save = true;
-    }
-
-    SetUInt32Value(ITEM_FIELD_CREATE_PLAYED_TIME, fields[9].Get<uint32>());
-    SetText(fields[10].Get<std::string>());
-
-    if (need_save)                                           // normal item changed state set not work at loading
+    if (need_save)
     {
         CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_ITEM_INSTANCE_ON_LOAD);
         stmt->SetData(0, GetUInt32Value(ITEM_FIELD_DURATION));
@@ -511,6 +558,7 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
         CharacterDatabase.Execute(stmt);
     }
 
+    //LOG_ERROR("entities.item", "<<< LoadFromDB FINISH: Entry {}, GUID {}", entry, guid);
     return true;
 }
 
@@ -521,6 +569,11 @@ void Item::DeleteFromDB(CharacterDatabaseTransaction trans, ObjectGuid::LowType 
     CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ITEM_INSTANCE);
     stmt->SetData(0, itemGuid);
     trans->Append(stmt);
+
+    // ОБЯЗАТЕЛЬНО: Удаляем кастомные данные предмета
+    CharacterDatabasePreparedStatement* stmtCustom = CharacterDatabase.GetPreparedStatement(CHAR_DEL_ITEM_CUSTOM_DATA);
+    stmtCustom->SetData(0, itemGuid);
+    trans->Append(stmtCustom);
 }
 
 void Item::DeleteFromDB(CharacterDatabaseTransaction trans)
@@ -689,11 +742,13 @@ void Item::SetItemRandomProperties(int32 randomPropId)
         ItemRandomSuffixEntry const* item_rand = sItemRandomSuffixStore.LookupEntry(-randomPropId);
         if (item_rand)
         {
-            if (GetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID) != -int32(item_rand->ID) ||
-                    !GetItemSuffixFactor())
+            if (GetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID) != -int32(item_rand->ID) || !GetItemSuffixFactor())
             {
                 SetInt32Value(ITEM_FIELD_RANDOM_PROPERTIES_ID, -int32(item_rand->ID));
+
+                // ИСПОЛЬЗУЕМ ТВОЙ МЕТОД:
                 UpdateItemSuffixFactor();
+
                 SetState(ITEM_CHANGED, GetOwner());
             }
 
@@ -705,9 +760,12 @@ void Item::SetItemRandomProperties(int32 randomPropId)
 
 void Item::UpdateItemSuffixFactor()
 {
-    uint32 suffixFactor = GenerateEnchSuffixFactor(GetEntry());
+    // Передаем _customIlvl. Если он 0, функция по старой логике возьмет уровень из шаблона.
+    uint32 suffixFactor = GenerateEnchSuffixFactor(GetEntry(), _customIlvl);
+
     if (GetItemSuffixFactor() == suffixFactor)
         return;
+
     SetUInt32Value(ITEM_FIELD_PROPERTY_SEED, suffixFactor);
 }
 
@@ -1084,7 +1142,7 @@ void Item::SendTimeUpdate(Player* owner)
     owner->SendDirectMessage(&data);
 }
 
-Item* Item::CreateItem(uint32 item, uint32 count, Player const* player, bool clone, uint32 randomPropertyId)
+Item* Item::CreateItem(uint32 item, uint32 count, Player const* player, bool clone, int32 randomPropertyId, uint32 customIlvl)
 {
     if (count < 1)
         return nullptr;                                        //don't create item at zero count
@@ -1102,7 +1160,23 @@ Item* Item::CreateItem(uint32 item, uint32 count, Player const* player, bool clo
         {
             pItem->SetCount(count);
             if (!clone)
-                pItem->SetItemRandomProperties(randomPropertyId ? randomPropertyId : Item::GenerateItemRandomPropertyId(item));
+            {
+                if ((pProto->Class == ITEM_CLASS_ARMOR || pProto->Class == ITEM_CLASS_WEAPON) && pProto->Quality >= ITEM_QUALITY_UNCOMMON)
+                {
+                    
+                    static const uint32 CustomItemLevels[] = { 146, 182, 226, 264, 300 };
+                    static const std::vector<uint32> AllowedSuffixes = { 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 26, 27, 29, 38, 39, 42, 47, 48, 50, 51, 52, 53, 57, 59, 67, 68, 69, 71, 74, 75, 77, 78, 81, 82, 84, 85, 86, 88, 89, 99 };
+
+                    // ЕСЛИ randomPropertyId передали (он не 0), используем его. 
+                    // Если он 0 (например, при крафте или покупке), роллим.
+                    int32 finalSuffixId = (randomPropertyId != 0) ? randomPropertyId : -int32(AllowedSuffixes[urand(0, AllowedSuffixes.size() - 1)]);
+                    uint32 finalIlvl = (customIlvl != 0) ? customIlvl : CustomItemLevels[urand(0, 4)];
+
+                    pItem->SetCustomIlvl(finalIlvl);
+                    pItem->SetItemRandomProperties(finalSuffixId);
+                    pItem->UpdateItemSuffixFactor();
+                }
+            }
             else if (randomPropertyId)
                 pItem->SetItemRandomProperties(randomPropertyId);
             return pItem;
@@ -1118,7 +1192,7 @@ Item* Item::CreateItem(uint32 item, uint32 count, Player const* player, bool clo
 Item* Item::CloneItem(uint32 count, Player const* player) const
 {
     // player CAN be nullptr in which case we must not update random properties because that accesses player's item update queue
-    Item* newItem = CreateItem(GetEntry(), count, player, true, player ? GetItemRandomPropertyId() : 0);
+    Item* newItem = CreateItem(GetEntry(), count, player, true, player ? GetItemRandomPropertyId() : 0, GetCustomIlvl());
     if (!newItem)
         return nullptr;
 

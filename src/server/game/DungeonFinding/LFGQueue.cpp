@@ -293,19 +293,19 @@ namespace lfg
             return LFG_INCOMPATIBLES_MULTIPLE_LFG_GROUPS;
 
         // Group with less that MAXGROUPSIZE members always compatible
-        if (!sLFGMgr->IsTesting() && check.size() == 1 && numPlayers < MAXGROUPSIZE)
-        {
-            LfgQueueDataContainer::iterator itQueue = QueueDataStore.find(check.front());
-            LfgRolesMap roles = itQueue->second.roles;
-            uint8 roleCheckResult = LFGMgr::CheckGroupRoles(roles);
-            strGuids.addRoles(roles);
-            itQueue->second.bestCompatible.clear(); // this may be left after a failed proposal (not cleared, because UpdateQueueTimers would try to generate it with every update)
-            //UpdateBestCompatibleInQueue(itQueue, strGuids);
-            AddToCompatibles(strGuids);
-            if (roleCheckResult && roleCheckResult <= 15)
-                foundMask |= ( (((uint64)1) << (roleCheckResult - 1)) | (((uint64)1) << (16 + roleCheckResult - 1)) | (((uint64)1) << (32 + roleCheckResult - 1)) | (((uint64)1) << (48 + roleCheckResult - 1)));
-            return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
-        }
+        //if (!sLFGMgr->IsTesting() && check.size() == 1 && numPlayers < 1)
+        //{
+        //    LfgQueueDataContainer::iterator itQueue = QueueDataStore.find(check.front());
+        //    LfgRolesMap roles = itQueue->second.roles;
+        //    uint8 roleCheckResult = LFGMgr::CheckGroupRoles(roles);
+        //    strGuids.addRoles(roles);
+        //    itQueue->second.bestCompatible.clear(); // this may be left after a failed proposal (not cleared, because UpdateQueueTimers would try to generate it with every update)
+        //    //UpdateBestCompatibleInQueue(itQueue, strGuids);
+        //    AddToCompatibles(strGuids);
+        //    if (roleCheckResult && roleCheckResult <= 15)
+        //        foundMask |= ((((uint64)1) << (roleCheckResult - 1)) | (((uint64)1) << (16 + roleCheckResult - 1)) | (((uint64)1) << (32 + roleCheckResult - 1)) | (((uint64)1) << (48 + roleCheckResult - 1)));
+        //    return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
+        //}
 
         if (numPlayers > MAXGROUPSIZE)
             return LFG_INCOMPATIBLES_TOO_MUCH_PLAYERS;
@@ -390,19 +390,28 @@ namespace lfg
         }
 
         // Enough players?
-        if (!sLFGMgr->IsTesting() && numPlayers != MAXGROUPSIZE)
+        //if (!sLFGMgr->IsTesting() && numPlayers != MAXGROUPSIZE)
+        //if (!sLFGMgr->IsTesting() && numPlayers < 1)
+        //{
+        //    strGuids.addRoles(proposalRoles);
+        //    for (uint8 i = 0; i < 5 && check.guids[i]; ++i)
+        //    {
+        //        LfgQueueDataContainer::iterator itr = QueueDataStore.find(check.guids[i]);
+        //        if (!itr->second.bestCompatible.empty()) // update if groups don't have it empty (for empty it will be generated in UpdateQueueTimers)
+        //            UpdateBestCompatibleInQueue(itr, strGuids);
+        //    }
+        //    AddToCompatibles(strGuids);
+        //    foundMask |= addToFoundMask;
+        //    ++foundCount;
+        //    return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
+        //}
+        // Нормализация ролей: убираем флаг LEADER, заменяем некорректные роли на DAMAGE
+        for (auto& p : proposalRoles)
         {
-            strGuids.addRoles(proposalRoles);
-            for (uint8 i = 0; i < 5 && check.guids[i]; ++i)
-            {
-                LfgQueueDataContainer::iterator itr = QueueDataStore.find(check.guids[i]);
-                if (!itr->second.bestCompatible.empty()) // update if groups don't have it empty (for empty it will be generated in UpdateQueueTimers)
-                    UpdateBestCompatibleInQueue(itr, strGuids);
-            }
-            AddToCompatibles(strGuids);
-            foundMask |= addToFoundMask;
-            ++foundCount;
-            return LFG_COMPATIBLES_WITH_LESS_PLAYERS;
+            uint8& role = p.second;
+            role &= ~PLAYER_ROLE_LEADER; // снимаем флаг лидера, если он есть
+            if (role != PLAYER_ROLE_TANK && role != PLAYER_ROLE_HEALER && role != PLAYER_ROLE_DAMAGE)
+                role = PLAYER_ROLE_DAMAGE; // на случай, если пришло 0 или другое значение
         }
 
         proposal.queues = strGuids;
@@ -537,21 +546,21 @@ namespace lfg
 
             switch (role)
             {
-                case PLAYER_ROLE_NONE:                                // Should not happen - just in case
-                    waitTime = -1;
-                    break;
-                case PLAYER_ROLE_TANK:
-                    waitTime = wtTank;
-                    break;
-                case PLAYER_ROLE_HEALER:
-                    waitTime = wtHealer;
-                    break;
-                case PLAYER_ROLE_DAMAGE:
-                    waitTime = wtDps;
-                    break;
-                default:
-                    waitTime = wtAvg;
-                    break;
+            case PLAYER_ROLE_NONE:                                // Should not happen - just in case
+                waitTime = -1;
+                break;
+            case PLAYER_ROLE_TANK:
+                waitTime = wtTank;
+                break;
+            case PLAYER_ROLE_HEALER:
+                waitTime = wtHealer;
+                break;
+            case PLAYER_ROLE_DAMAGE:
+                waitTime = wtDps;
+                break;
+            default:
+                waitTime = wtAvg;
+                break;
             }
 
             if (queueinfo.bestCompatible.empty())

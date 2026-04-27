@@ -2593,23 +2593,24 @@ void Player::RemoveAmmo()
         UpdateDamagePhysical(RANGED_ATTACK);
 }
 
-Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update, int32 randomPropertyId, bool refund)
+Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update, int32 randomPropertyId, uint32 customIlvl, bool refund)
 {
     AllowedLooterSet allowedLooters;
     return StoreNewItem(dest, item, update, randomPropertyId, allowedLooters, refund);
 }
 
 // Return stored item (if stored to stack, it can diff. from pItem). And pItem ca be deleted in this case.
-Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update, int32 randomPropertyId, AllowedLooterSet& allowedLooters, bool refund)
+Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update, int32 randomPropertyId, AllowedLooterSet& allowedLooters, uint32 customIlvl, bool refund)
 {
     uint32 count = 0;
     for (ItemPosCountVec::const_iterator itr = dest.begin(); itr != dest.end(); ++itr)
         count += itr->count;
 
-    Item* pItem = Item::CreateItem(item, count, this, false, randomPropertyId);
+    // Передаем customIlvl в CreateItem (убедись, что CreateItem теперь принимает 6 аргументов)
+    Item* pItem = Item::CreateItem(item, count, this, false, randomPropertyId, customIlvl);
+
     if (pItem)
     {
-        // pussywizard: obtaining blue or better items saves to db
         if (ItemTemplate const* pProto = sObjectMgr->GetItemTemplate(item))
             if (pProto->Quality >= ITEM_QUALITY_RARE)
                 AdditionalSavingAddMask(ADDITIONAL_SAVING_INVENTORY_AND_GOLD);
@@ -2617,7 +2618,7 @@ Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update
         ItemAddedQuestCheck(item, count);
 
         if (!refund)
-        { // Don't update counter criteria for refunded items (primarily currencies)
+        {
             UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_RECEIVE_EPIC_ITEM, item, count);
             UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_OWN_ITEM, item, count);
         }
@@ -2630,7 +2631,6 @@ Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update
             pItem->SetUInt32Value(ITEM_FIELD_CREATE_PLAYED_TIME, GetTotalPlayedTime());
             AddTradeableItem(pItem);
 
-            // save data
             std::ostringstream ss;
             AllowedLooterSet::const_iterator itr = allowedLooters.begin();
             ss << (*itr).GetCounter();

@@ -397,13 +397,24 @@ LootItem::LootItem(LootStoreItem const& li)
     conditions   = li.conditions;
 
     ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemid);
-    freeforall  = proto && proto->HasFlag(ITEM_FLAG_MULTI_DROP);
-    follow_loot_rules = proto && proto->HasFlagCu(ITEM_FLAGS_CU_FOLLOW_LOOT_RULES);
 
-    needs_quest = li.needs_quest;
+    // 1. Инициализируем дефолтными значениями (безопасность)
+    randomSuffix     = 0; 
+    randomPropertyId = 0;
+    customIlvl = 0;
 
-    randomSuffix = GenerateEnchSuffixFactor(itemid);
-    randomPropertyId = Item::GenerateItemRandomPropertyId(itemid);
+    // 2. ФИЛЬТР: Применяем кастомные статы ТОЛЬКО к экипируемым предметам
+    // (оружие, броня, бижутерия), у которых класс предмета = 2 (Оружие) или 4 (Броня)
+    if (proto && (proto->Class == ITEM_CLASS_WEAPON || proto->Class == ITEM_CLASS_ARMOR))
+    {
+        static const uint32 CustomItemLevels[] = { 146, 182, 226, 264, 300 };
+        customIlvl = CustomItemLevels[urand(0, 4)];
+
+        static const std::vector<uint32> AllowedSuffixes = { 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 26, 27, 29, 38, 39, 42, 47, 48, 50, 51, 52, 53, 57, 59, 67, 68, 69, 71, 74, 75, 77, 78, 81, 82, 84, 85, 86, 88, 89, 99 };
+        randomPropertyId = -int32(AllowedSuffixes[urand(0, AllowedSuffixes.size() - 1)]);
+    }
+    //randomSuffix = GenerateEnchSuffixFactor(itemid, 0);
+    //randomPropertyId = Item::GenerateItemRandomPropertyId(itemid);
     count = 0;
     is_looted = false;
     is_blocked = false;

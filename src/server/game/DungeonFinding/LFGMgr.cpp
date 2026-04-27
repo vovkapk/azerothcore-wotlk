@@ -1788,6 +1788,7 @@ namespace lfg
             return;
 
         grp->SetDungeonDifficulty(Difficulty(dungeon->difficulty));
+        grp->SetRaidDifficulty(Difficulty(dungeon->difficulty));
         ObjectGuid gguid = grp->GetGUID();
         SetDungeon(gguid, dungeon->Entry());
         SetState(gguid, LFG_STATE_DUNGEON);
@@ -1851,27 +1852,37 @@ namespace lfg
 
                 if (player->GetMapId() == uint32(dungeon->map))
                 {
-                    // check instance id with leader
+                    // Проверяем ID инстанса относительно лидера
                     if (!leaderTeleportIncluded)
                     {
-                        if (InstancePlayerBind* ilb = sInstanceSaveMgr->PlayerGetBoundInstance(grp->GetLeaderGUID(), dungeon->map, player->GetDungeonDifficulty()))
+                        // Пытаемся найти привязку лидера либо как подземелье, либо как рейд
+                        InstancePlayerBind* ilb = sInstanceSaveMgr->PlayerGetBoundInstance(grp->GetLeaderGUID(), dungeon->map, player->GetDungeonDifficulty());
+                        if (!ilb) // Если не нашли как данж, ищем как рейд
+                            ilb = sInstanceSaveMgr->PlayerGetBoundInstance(grp->GetLeaderGUID(), dungeon->map, player->GetRaidDifficulty());
+
+                        if (ilb)
                         {
                             if (player->GetInstanceId() == ilb->save->GetInstanceId())
                             {
-                                // Do not teleport if in the same map and instance as leader
+                                // Не телепортируем, если игрок уже в той же копии, что и лидер
                                 continue;
                             }
                         }
                     }
 
-                    // Remove bind to that map
+                    // Если мы здесь, значит нужно отвязать игрока от этой карты
+                    // Сбрасываем КД и для режима подземелья, и для режима рейда
                     sInstanceSaveMgr->PlayerUnbindInstance(player->GetGUID(), dungeon->map, player->GetDungeonDifficulty(), true);
+                    sInstanceSaveMgr->PlayerUnbindInstance(player->GetGUID(), dungeon->map, player->GetRaidDifficulty(), true);
                 }
                 else
                 {
-                    // RDF removes all binds to that map
+                    // Если это случайное подземелье/рейд (RDF), всегда сбрасываем привязки к этой карте
                     if (randomDungeon)
+                    {
                         sInstanceSaveMgr->PlayerUnbindInstance(player->GetGUID(), dungeon->map, player->GetDungeonDifficulty(), true);
+                        sInstanceSaveMgr->PlayerUnbindInstance(player->GetGUID(), dungeon->map, player->GetRaidDifficulty(), true);
+                    }
                 }
 
                 playersTeleported.push_back(player);
@@ -1883,9 +1894,24 @@ namespace lfg
             TeleportPlayer(player, false, teleportLocation);
         }
 
+        bool isHeroic = false;
+        if (dungeon->type == LFG_TYPE_RAID)
+        {
+            // Для рейдов героики - это ID 2 (10г) и 3 (25г)
+            if (dungeon->difficulty >= RAID_DIFFICULTY_10MAN_HEROIC)
+                isHeroic = true;
+        }
+        else
+        {
+            // Для обычных подземелий героик - это ID 1
+            if (dungeon->difficulty == DUNGEON_DIFFICULTY_HEROIC)
+                isHeroic = true;
+        }
+
         if (randomDungeon)
             grp->AddLfgRandomInstanceFlag();
-        if (Difficulty(dungeon->difficulty) == DUNGEON_DIFFICULTY_HEROIC)
+
+        if (isHeroic)
             grp->AddLfgHeroicFlag();
 
         // Update group info
@@ -2747,6 +2773,9 @@ namespace lfg
 
     void LFGMgr::SendLfgRoleChosen(ObjectGuid guid, ObjectGuid pguid, uint8 roles)
     {
+        roles &= ~PLAYER_ROLE_LEADER;
+        if (roles != PLAYER_ROLE_TANK && roles != PLAYER_ROLE_HEALER && roles != PLAYER_ROLE_DAMAGE)
+            roles = PLAYER_ROLE_DAMAGE;
         if (Player* player = ObjectAccessor::FindConnectedPlayer(guid))
             player->GetSession()->SendLfgRoleChosen(pguid, roles);
     }

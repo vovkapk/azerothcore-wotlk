@@ -157,6 +157,7 @@ public:
             {
                 case 1:
                     AddGossipItemFor(player, GOSSIP_ICON_CHAT, GOSSIP_ITEM_1, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
+                    AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Пропустить Трибунал и сразу идти к Сьонниру", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 5);
                     SendGossipMenuFor(player, TEXT_ID_START, creature->GetGUID());
                     break;
                 case 2:
@@ -201,6 +202,10 @@ public:
                     break;
                 case GOSSIP_ACTION_INFO_DEF+4:
                     creature->AI()->DoAction(ACTION_OPEN_DOOR);
+                    CloseGossipMenuFor(player);
+                    break;
+                case GOSSIP_ACTION_INFO_DEF + 5:
+                    creature->AI()->DoAction(ACTION_SKIP_TRIBUNAL);
                     CloseGossipMenuFor(player);
                     break;
             }
@@ -427,6 +432,55 @@ public:
                     me->SetWalk(true);
                     me->SetSpeed(MOVE_WALK, 1.0f);
                     break;
+                case ACTION_SKIP_TRIBUNAL:
+                {
+                    // Останавливаем текущий эскорт (если идёт)
+                    SetEscortPaused(true);
+
+                    // Сбрасываем все события и призывы (головы, мобов)
+                    ResetEvent();
+
+                    if (pInstance)
+                    {
+                        // Отмечаем Трибунал как пройденный
+                        pInstance->SetData(BOSS_TRIBUNAL_OF_AGES, DONE);
+                        // Устанавливаем стадию Бранна так, чтобы появился диалог открытия двери
+                        pInstance->SetData(BRANN_BRONZEBEARD, 4);
+
+                        // Выдаём квестовый кредит (если у кого-то есть квест)
+                        me->CastSpell(me, SPELL_TRIBUNAL_CREDIT_MARKER, true);
+
+                        // Спавним сундук с наградой (как в оригинале)
+                        if (Player* plr = SelectTargetFromPlayerList(200.0f))
+                        {
+                            uint32 chestEntry = IsHeroic() ? GO_TRIBUNAL_CHEST_H : GO_TRIBUNAL_CHEST;
+                            if (GameObject* go = plr->SummonGameObject(chestEntry, 880.406f, 345.164f, 203.706f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0))
+                            {
+                                plr->RemoveGameObject(go, false);
+                                go->SetLootMode(1);
+                                go->ReplaceAllGameObjectFlags((GameObjectFlags)0);
+                            }
+                        }
+
+                        // Телепортируем Бранна к двери Сьоннира (позиция из waypoint 18)
+                        me->SetReactState(REACT_PASSIVE);
+                        me->SetRegeneratingHealth(true);
+                        me->SetImmuneToAll(true);
+                        me->SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_STATE_READY_UNARMED);
+                        DoCast(me, 58506, false); // визуал телепорта
+                        me->SetHomePosition(1199.8f, 667.138f, 196.242f, 3.12967f);
+                        me->Relocate(1199.8f, 667.138f, 196.242f, 3.12967f);
+                        me->SendMovementFlagUpdate();
+
+                        // Сразу открываем дверь к Сьонниру
+                        //if (GameObject* door = ObjectAccessor::GetGameObject(*me, pInstance->GetGuidData(GO_SJONNIR_DOOR)))
+                        //    door->SetGoState(GO_STATE_ACTIVE);
+
+                        // Возвращаем флаги, чтобы с Бранном можно было поговорить и открыть дверь (если нужно)
+                        me->ReplaceAllNpcFlags(UNIT_NPC_FLAG_GOSSIP | UNIT_NPC_FLAG_QUESTGIVER);
+                    }
+                    break;
+                }
             }
         }
 

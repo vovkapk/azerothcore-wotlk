@@ -11283,6 +11283,11 @@ void Unit::UpdateSpeed(UnitMoveType mtype, bool forced)
             speed = min_speed;
     }
 
+    // <-- Добавь сюда
+    sScriptMgr->OnCalculateUnitSpeed(this, mtype, speed);
+    if (speed <= 0.01f)
+        speed = 0.01f;
+
     SetSpeed(mtype, speed, forced);
 }
 
